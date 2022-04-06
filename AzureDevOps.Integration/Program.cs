@@ -13,8 +13,9 @@ builder
     .ConnectToAzureDevOps()
     .GetConfiguredRepository()
     .GetBuildDefinitions()
+    .UpdateBuildDefinitionsWithTagTask()
     .ToList()
-    .ForEach(build => Console.WriteLine($"Build Definition: {build.Name}"));
+    .ForEach(taskGroup => Console.WriteLine($"Task Group: {taskGroup.Name}"));
 
 Console.ReadKey();
 
