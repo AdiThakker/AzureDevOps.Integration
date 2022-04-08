@@ -11,14 +11,10 @@ namespace AzureDevOps.Integration.Models
 {
     public class DevOpsContext
     {
-        public DevOpsContext(VssConnection connection) => Connection = connection;
+        public DevOpsContext(VssConnection connection) => Connection = connection ?? throw new ArgumentNullException(nameof(connection));
 
-        public DevOpsContext(VssConnection connection, string projectName, GitRepository repo) : this(connection)
-        {
-            ProjectName = projectName;
-            Repo = repo;
-        }        
-        
+        public DevOpsContext(VssConnection connection, Dictionary<string, object> properties) : this(connection) => Properties = properties ?? throw new ArgumentNullException(nameof(properties));
+
         public DevOpsContext(VssConnection connection, string projectName, GitRepository repo, IEnumerable<BuildDefinition> buildDefinitions) : this(connection)
         {
             ProjectName = projectName;
@@ -31,8 +27,10 @@ namespace AzureDevOps.Integration.Models
         
         public GitRepository? Repo { get; private set; }
         
-        public IEnumerable<BuildDefinition> BuildDefinitions { get; private set;  }
+        public IEnumerable<BuildDefinition>? BuildDefinitions { get; private set;  }
         
         public VssConnection Connection { get; private set; }
+        
+        public Dictionary<string, object>? Properties { get; }
     }
 }
