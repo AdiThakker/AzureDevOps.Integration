@@ -8,12 +8,17 @@ Console.WriteLine("Hello, Azure DevOps!");
 var builder  = new ConfigurationBuilder()
                     .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
                     .AddUserSecrets<Program>();
-builder
+var buildDefinition = builder
     .Build()
     .ConnectToAzureDevOps()
     .GetConfiguredRepository()
-    .GetLatestBuildDefinition()
-    .UpdateLatestBuildDefinitionsWithTagTask();
+    //.GetLatestBuildDefinition()
+    //.UpdateLatestBuildDefinitionsWithTagTask()
+    .GetLatestReleaseDefinition()
+    .UpdateLatestReleaseDefinitionsWithTagTask();
+
+
+    //.UpdateLatestReleaseDefinitionsWithTagTask();
 
 Console.ReadKey();
 

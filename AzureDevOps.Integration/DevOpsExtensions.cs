@@ -10,6 +10,9 @@ using Microsoft.TeamFoundation.Core.WebApi;
 using Microsoft.TeamFoundation.DistributedTask.WebApi;
 using Microsoft.TeamFoundation.SourceControl.WebApi;
 using Microsoft.VisualStudio.Services.Common;
+using Microsoft.VisualStudio.Services.ReleaseManagement.WebApi;
+using Microsoft.VisualStudio.Services.ReleaseManagement.WebApi.Clients;
+using Microsoft.VisualStudio.Services.ReleaseManagement.WebApi.Contracts;
 using Microsoft.VisualStudio.Services.WebApi;
 
 namespace AzureDevOps.Integration
@@ -42,7 +45,7 @@ namespace AzureDevOps.Integration
                 var properties = new Dictionary<string, object>();
                 properties.Add("project", project);
                 properties.Add("repo", repository);
-                
+
                 return new DevOpsContext(context.Connection, properties);
             }
         }
@@ -78,7 +81,7 @@ namespace AzureDevOps.Integration
 
                 // import to the build definition
                 var phase = process.Phases.First();
-                phase.Steps.Add(new BuildDefinitionStep()
+                var buildDefinitionStep = new BuildDefinitionStep()
                 {
                     DisplayName = taskGroup.Name, // tagTask.DisplayName,
                     AlwaysRun = true, //taskGroup.// tagTask.AlwaysRun,
@@ -86,23 +89,106 @@ namespace AzureDevOps.Integration
                     //ContinueOnError = tagTask.ContinueOnError,
                     Enabled = tagTask.Enabled,
                     Environment = tagTask.Environment,
-                    Inputs = tagTask.Inputs,
                     //RefName = tagTask.ReferenceName,
                     TimeoutInMinutes = tagTask.TimeoutInMinutes,
                     TaskDefinition = new Microsoft.TeamFoundation.Build.WebApi.TaskDefinitionReference()
                     {
                         DefinitionType = "metaTask",
                         Id = taskGroup.Id,
-
+                        VersionSpec = "1.*"
                     }
-                });
+                };
+                buildDefinitionStep.Inputs = new Dictionary<string, string>();
+                taskGroup.Inputs.ToList().ForEach(input => buildDefinitionStep.Inputs.Add(input.Name, @"$(System.DefaultWorkingDirectory)\"));
+                phase.Steps.Add(buildDefinitionStep);
             }
 
+            buildDefinition.Comment = "Updated with tag task";
             var buildClient = connection.GetClient<BuildHttpClient>();
             buildDefinition = buildClient.UpdateDefinitionAsync(buildDefinition).Result;
 
+            var steps = buildDefinition.GetProcess<DesignerProcess>().Phases.First().Steps.ToList();
+
+
 
             return buildDefinition;
+        }
+
+        public static DevOpsContext GetLatestReleaseDefinition(this DevOpsContext context)
+        {
+            var releaseClient = context.Connection.GetClient<ReleaseHttpClient>();
+            {
+                var latestDefinition = releaseClient.GetReleaseDefinitionsAsync(project: project, "", ReleaseDefinitionExpands.Environments | ReleaseDefinitionExpands.Triggers).Result.FirstOrDefault();
+                Dictionary<string, object> properties = context.Properties ?? new Dictionary<string, object>();
+                properties.Add("latestReleaseDefinition", latestDefinition ?? new ReleaseDefinition() { Name = "Adding Tags Definition" });
+
+                return new DevOpsContext(context.Connection, properties);
+            }
+        }
+
+        public static ReleaseDefinition UpdateLatestReleaseDefinitionsWithTagTask(this DevOpsContext context)
+        {
+            var releaseDefinition = (ReleaseDefinition)context.Properties["latestReleaseDefinition"];
+
+            var releaseClient = context.Connection.GetClient<ReleaseHttpClient>();
+            {
+                var latestRelease = releaseClient.GetReleaseDefinitionAsync(project, releaseDefinition.Id).Result;
+            }
+
+
+            var deployPhases = releaseDefinition?.Environments.First().DeployPhases;
+
+            var worklfowTasks = deployPhases.First().WorkflowTasks;
+
+            worklfowTasks.ToList().ForEach(task =>
+            {
+                //task.Name;
+            });
+
+
+
+
+
+            //if (process == null)
+            //    process = new DesignerProcess();
+            //var connection = new VssConnection(new Uri(url), new VssBasicCredential(string.Empty, token));
+
+
+            //using (var taskClient = connection.GetClient<TaskAgentHttpClient>())
+            //{
+            //    var taskGroups = ta; skClient.GetTaskGroupsAsync(project).Result;
+
+            //    // Get tag Group
+            //    var taskGroup = taskGroups.First(group => group.Name == "Update Tags");
+            //    var tagTask = taskGroup.Tasks.First();
+
+            //    // import to the build definition
+            //    var phase = process.Phases.First();
+            //    phase.Steps.Add(new BuildDefinitionStep()
+            //    {
+            //        DisplayName = taskGroup.Name, // tagTask.DisplayName,
+            //        AlwaysRun = true, //taskGroup.// tagTask.AlwaysRun,
+            //        //Condition = tagTask.Condition,
+            //        //ContinueOnError = tagTask.ContinueOnError,
+            //        Enabled = tagTask.Enabled,
+            //        Environment = tagTask.Environment,
+            //        Inputs = tagTask.Inputs,
+            //        //RefName = tagTask.ReferenceName,
+            //        TimeoutInMinutes = tagTask.TimeoutInMinutes,
+            //        TaskDefinition = new Microsoft.TeamFoundation.Build.WebApi.TaskDefinitionReference()
+            //        {
+            //            DefinitionType = "metaTask",
+            //            Id = taskGroup.Id,
+
+            //        }
+            //    });
+            //}
+
+            //var buildClient = connection.GetClient<BuildHttpClient>();
+            //releaseDefinition = buildClient.UpdateDefinitionAsync(releaseDefinition).Result;
+
+
+            return releaseDefinition;
         }
     }
 }
