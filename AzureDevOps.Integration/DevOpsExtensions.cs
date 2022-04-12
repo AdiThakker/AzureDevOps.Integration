@@ -129,10 +129,9 @@ namespace AzureDevOps.Integration
         public static ReleaseDefinition UpdateLatestReleaseDefinitionsWithTagTask(this DevOpsContext context)
         {
             var releaseDefinition = (ReleaseDefinition)context.Properties["latestReleaseDefinition"];
-
             var connection = new VssConnection(new Uri(url), new VssBasicCredential(string.Empty, token));
 
-            using (var releaseClient = context.Connection.GetClient<ReleaseHttpClient>())
+            using (var releaseClient = connection.GetClient<ReleaseHttpClient>())
             using (var taskClient = connection.GetClient<TaskAgentHttpClient>())
             {
                 var taskGroups = taskClient.GetTaskGroupsAsync(project).Result;
@@ -142,29 +141,41 @@ namespace AzureDevOps.Integration
                 var environment = releaseDefinition.Environments.First();
                 var currentRelease = environment.CurrentReleaseReference;
 
-                var latestRelease = releaseClient.GetReleaseEnvironmentAsync(project,currentRelease.Id, currentRelease.Id).Result;
-
-                var deployPhases = latestRelease.DeploySteps;
+                var latestRelease = releaseClient.GetReleaseDefinitionAsync(project, environment.Id).Result;
                 
-                //var workflowTasks = deployPhases.First().WorkflowTasks;
-                
-                //workflowTasks.Add(new WorkflowTask()
-                //{
-                //    Name = taskGroup.Name, // tagTask.DisplayName,
-                //    AlwaysRun = true, //taskGroup.// tagTask.AlwaysRun,
-                //    //Condition = tagTask.Condition,
-                //    //ContinueOnError = tagTask.ContinueOnError,
-                //    Enabled = tagTask.Enabled,
-                //    //RefName = tagTask.ReferenceName,
-                //    TimeoutInMinutes = tagTask.TimeoutInMinutes,
-                //    TaskId = taskGroup.Id,
-                //    Version = "1.*"
+                var workflowTasks = latestRelease.Environments.First().DeployPhases.First().WorkflowTasks;
 
-                //});
-                //releaseDefinition = releaseClient.UpdateReleaseEnvironmentAsync(releaseDefinition).Result;
+                //var lastTask = latestRelease.Environments.First().DeployPhases.First().WorkflowTasks.Last();
+                var worklflowTask = new WorkflowTask()
+                {
+                    Name = taskGroup.Name,  
+                    Version = taskGroup.Version,
+                    AlwaysRun = tagTask.AlwaysRun,
+                    Condition = tagTask.Condition,
+                    ContinueOnError = tagTask.ContinueOnError,
+                    Enabled = tagTask.Enabled,
+                    TimeoutInMinutes = tagTask.TimeoutInMinutes,
+                    TaskId = taskGroup.Id,
+                    DefinitionType = "metaTask",
+
+                };
+                worklflowTask.Inputs = new Dictionary<string, string>();
+                taskGroup.Inputs.ToList().ForEach(input => worklflowTask.Inputs.Add(input.Name, ""));
+                latestRelease.Environments.First().DeployPhases.First().WorkflowTasks.Add(worklflowTask);
+                                
+                try
+                {
+                    latestRelease = releaseClient.UpdateReleaseDefinitionAsync(latestRelease, project).Result;
+                }
+                catch (AggregateException aex)
+                {
+                    var result = aex.Flatten();
+                    throw;
+                }
+                return latestRelease;
             }
 
-            return releaseDefinition;
+            
         }
     }
 }
