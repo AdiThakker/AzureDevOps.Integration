@@ -20,9 +20,7 @@ namespace AzureDevOps.Integration
     public static class DevOpsExtensions
     {
         private const string buildDefinitionKey = "latestBuildDefinition";
-        private const string projectKey = "project";
-        private const string repoKey = "repo";
-
+        private const string releaseDefinitionKey = "latestReleaseDefinition";
         static string token = string.Empty;
         static string url = string.Empty;
         static string project = string.Empty;
@@ -46,8 +44,6 @@ namespace AzureDevOps.Integration
 
             var repository = gitClient.GetRepositoryAsync(project, repo).Result;
             var properties = new Dictionary<string, object>();
-            properties.Add(projectKey, project);
-            properties.Add(repoKey, repository);
 
             return new DevOpsContext(context.Connection, properties);
         }
@@ -106,12 +102,9 @@ namespace AzureDevOps.Integration
             try
             {
                 using var buildClient = context.Connection.GetClient<BuildHttpClient>();
-
                 buildDefinition = buildClient.UpdateDefinitionAsync(buildDefinition).Result;
                 var steps = buildDefinition.GetProcess<DesignerProcess>().Phases.First().Steps.ToList();
-
                 return buildDefinition;
-
             }
             catch (AggregateException aex)
             {
@@ -122,33 +115,29 @@ namespace AzureDevOps.Integration
         public static DevOpsContext GetLatestReleaseDefinition(this DevOpsContext context)
         {
             using var releaseClient = context.Connection.GetClient<ReleaseHttpClient>();
-
             var latestDefinition = releaseClient.GetReleaseDefinitionsAsync(project: project, "", ReleaseDefinitionExpands.Environments).Result.FirstOrDefault();
             Dictionary<string, object> properties = context.Properties ?? new Dictionary<string, object>();
-            properties.Add("latestReleaseDefinition", latestDefinition ?? new ReleaseDefinition() { Name = "Adding Meta Tags Task" });
-
+            properties.Add(releaseDefinitionKey, latestDefinition ?? new ReleaseDefinition() { Name = "Adding Meta Tags Task" });
             return new DevOpsContext(context.Connection, properties);
-
         }
 
         public static ReleaseDefinition UpdateLatestReleaseDefinitionsWithTagTask(this DevOpsContext context)
         {
-            var releaseDefinition = (ReleaseDefinition)context.Properties["latestReleaseDefinition"];
+            // Get release definition
+            var releaseDefinition = context.Properties[releaseDefinitionKey] as ReleaseDefinition;
 
-            using var releaseClient = context.Connection.GetClient<ReleaseHttpClient>();
+            // retrieve task from task group
             using var taskClient = context.Connection.GetClient<TaskAgentHttpClient>();
-
             var taskGroups = taskClient.GetTaskGroupsAsync(project).Result;
             var taskGroup = taskGroups.First(group => group.Name == "Update Tags");
             var tagTask = taskGroup.Tasks.First();
 
-            var environment = releaseDefinition.Environments.First();
-            var currentRelease = environment.CurrentReleaseReference;
+            // Get latest release definition by env.
+            using var releaseClient = context.Connection.GetClient<ReleaseHttpClient>();
+            var releaseDefinitionByEnv = releaseClient.GetReleaseDefinitionAsync(project, releaseDefinition.Environments.First().Id).Result;
 
-            var latestRelease = releaseClient.GetReleaseDefinitionAsync(project, environment.Id).Result;
-
-            var workflowTasks = latestRelease.Environments.First().DeployPhases.First().WorkflowTasks;
-
+            // Get definition steps
+            var workflowTasks = releaseDefinitionByEnv.Environments.First().DeployPhases.First().WorkflowTasks;
             var worklflowTask = new WorkflowTask()
             {
                 Name = taskGroup.Name,
@@ -159,23 +148,36 @@ namespace AzureDevOps.Integration
                 Enabled = tagTask.Enabled,
                 TimeoutInMinutes = tagTask.TimeoutInMinutes,
                 TaskId = taskGroup.Id,
-                DefinitionType = "metaTask",
-
+                DefinitionType = "metaTask"
             };
             worklflowTask.Inputs = new Dictionary<string, string>();
-            taskGroup.Inputs.ToList().ForEach(input => worklflowTask.Inputs.Add(input.Name, ""));
-            latestRelease.Environments.First().DeployPhases.First().WorkflowTasks.Add(worklflowTask);
-
+            taskGroup.Inputs.ToList().ForEach(input =>
+            {
+                var value = input.Name switch
+                {
+                    "AzureSubscription" => "<default subscription>",
+                    "resourceGroupName" => "<default resource group name>",
+                    "resourceName" => "<default resource name>",
+                    "tagsfile" => @"$(System.DefaultWorkingDirectory)\**\Tags.txt",
+                    _ => ""
+                };
+                worklflowTask.Inputs.Add(input.Name, value);
+            });
+            
+            // Update definition
+            releaseDefinitionByEnv.Environments.First().DeployPhases.First().WorkflowTasks.Add(worklflowTask);
+            releaseDefinitionByEnv.Comment = "Updated with Update tag task";
+                
             try
             {
-                latestRelease = releaseClient.UpdateReleaseDefinitionAsync(latestRelease, project).Result;
+                releaseDefinitionByEnv = releaseClient.UpdateReleaseDefinitionAsync(releaseDefinitionByEnv, project).Result;
             }
             catch (AggregateException aex)
             {
                 throw new Exception(aex.Flatten().ToString());
             }
             
-            return latestRelease;
+            return releaseDefinitionByEnv;
         }
     }
 }

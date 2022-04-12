@@ -21,9 +21,9 @@ devOps
     .UpdateLatestBuildDefinitionsWithTagTask();
 
 // update release definition
-//devOps
-//    .GetLatestReleaseDefinition()
-//    .UpdateLatestReleaseDefinitionsWithTagTask();
+devOps
+    .GetLatestReleaseDefinition()
+    .UpdateLatestReleaseDefinitionsWithTagTask();
 
 Console.ReadKey();
 
