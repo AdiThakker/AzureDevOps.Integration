@@ -118,7 +118,7 @@ namespace AzureDevOps.Integration
         {
             var releaseClient = context.Connection.GetClient<ReleaseHttpClient>();
             {
-                var latestDefinition = releaseClient.GetReleaseDefinitionsAsync(project: project, "", ReleaseDefinitionExpands.Environments | ReleaseDefinitionExpands.Triggers).Result.FirstOrDefault();
+                var latestDefinition = releaseClient.GetReleaseDefinitionsAsync(project: project, "", ReleaseDefinitionExpands.Environments).Result.FirstOrDefault();
                 Dictionary<string, object> properties = context.Properties ?? new Dictionary<string, object>();
                 properties.Add("latestReleaseDefinition", latestDefinition ?? new ReleaseDefinition() { Name = "Adding Tags Definition" });
 
@@ -130,63 +130,39 @@ namespace AzureDevOps.Integration
         {
             var releaseDefinition = (ReleaseDefinition)context.Properties["latestReleaseDefinition"];
 
-            var releaseClient = context.Connection.GetClient<ReleaseHttpClient>();
+            var connection = new VssConnection(new Uri(url), new VssBasicCredential(string.Empty, token));
+
+            using (var releaseClient = context.Connection.GetClient<ReleaseHttpClient>())
+            using (var taskClient = connection.GetClient<TaskAgentHttpClient>())
             {
-                var latestRelease = releaseClient.GetReleaseDefinitionAsync(project, releaseDefinition.Id).Result;
+                var taskGroups = taskClient.GetTaskGroupsAsync(project).Result;
+                var taskGroup = taskGroups.First(group => group.Name == "Update Tags");
+                var tagTask = taskGroup.Tasks.First();
+
+                var environment = releaseDefinition.Environments.First();
+                var currentRelease = environment.CurrentReleaseReference;
+
+                var latestRelease = releaseClient.GetReleaseEnvironmentAsync(project,currentRelease.Id, currentRelease.Id).Result;
+
+                var deployPhases = latestRelease.DeploySteps;
+                
+                //var workflowTasks = deployPhases.First().WorkflowTasks;
+                
+                //workflowTasks.Add(new WorkflowTask()
+                //{
+                //    Name = taskGroup.Name, // tagTask.DisplayName,
+                //    AlwaysRun = true, //taskGroup.// tagTask.AlwaysRun,
+                //    //Condition = tagTask.Condition,
+                //    //ContinueOnError = tagTask.ContinueOnError,
+                //    Enabled = tagTask.Enabled,
+                //    //RefName = tagTask.ReferenceName,
+                //    TimeoutInMinutes = tagTask.TimeoutInMinutes,
+                //    TaskId = taskGroup.Id,
+                //    Version = "1.*"
+
+                //});
+                //releaseDefinition = releaseClient.UpdateReleaseEnvironmentAsync(releaseDefinition).Result;
             }
-
-
-            var deployPhases = releaseDefinition?.Environments.First().DeployPhases;
-
-            var worklfowTasks = deployPhases.First().WorkflowTasks;
-
-            worklfowTasks.ToList().ForEach(task =>
-            {
-                //task.Name;
-            });
-
-
-
-
-
-            //if (process == null)
-            //    process = new DesignerProcess();
-            //var connection = new VssConnection(new Uri(url), new VssBasicCredential(string.Empty, token));
-
-
-            //using (var taskClient = connection.GetClient<TaskAgentHttpClient>())
-            //{
-            //    var taskGroups = ta; skClient.GetTaskGroupsAsync(project).Result;
-
-            //    // Get tag Group
-            //    var taskGroup = taskGroups.First(group => group.Name == "Update Tags");
-            //    var tagTask = taskGroup.Tasks.First();
-
-            //    // import to the build definition
-            //    var phase = process.Phases.First();
-            //    phase.Steps.Add(new BuildDefinitionStep()
-            //    {
-            //        DisplayName = taskGroup.Name, // tagTask.DisplayName,
-            //        AlwaysRun = true, //taskGroup.// tagTask.AlwaysRun,
-            //        //Condition = tagTask.Condition,
-            //        //ContinueOnError = tagTask.ContinueOnError,
-            //        Enabled = tagTask.Enabled,
-            //        Environment = tagTask.Environment,
-            //        Inputs = tagTask.Inputs,
-            //        //RefName = tagTask.ReferenceName,
-            //        TimeoutInMinutes = tagTask.TimeoutInMinutes,
-            //        TaskDefinition = new Microsoft.TeamFoundation.Build.WebApi.TaskDefinitionReference()
-            //        {
-            //            DefinitionType = "metaTask",
-            //            Id = taskGroup.Id,
-
-            //        }
-            //    });
-            //}
-
-            //var buildClient = connection.GetClient<BuildHttpClient>();
-            //releaseDefinition = buildClient.UpdateDefinitionAsync(releaseDefinition).Result;
-
 
             return releaseDefinition;
         }
