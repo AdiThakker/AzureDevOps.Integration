@@ -19,6 +19,10 @@ namespace AzureDevOps.Integration
 {
     public static class DevOpsExtensions
     {
+        private const string buildDefinitionKey = "latestBuildDefinition";
+        private const string projectKey = "project";
+        private const string repoKey = "repo";
+
         static string token = string.Empty;
         static string url = string.Empty;
         static string project = string.Empty;
@@ -33,149 +37,145 @@ namespace AzureDevOps.Integration
             repo = configuration.GetValue<string>("repo");
 
             // return instance of VssConnection using Personal Access Token
-            return new DevOpsContext(new VssConnection(new Uri(url), new VssBasicCredential(string.Empty, configuration.GetValue<string>(token))));
-
+            return new DevOpsContext(new VssConnection(new Uri(url), new VssBasicCredential(string.Empty, token)));
         }
 
         public static DevOpsContext GetConfiguredRepository(this DevOpsContext context)
         {
-            using (var gitClient = context.Connection.GetClient<GitHttpClient>())
-            {
-                var repository = gitClient.GetRepositoryAsync(project, repo).Result;
-                var properties = new Dictionary<string, object>();
-                properties.Add("project", project);
-                properties.Add("repo", repository);
+            using var gitClient = context.Connection.GetClient<GitHttpClient>();
 
-                return new DevOpsContext(context.Connection, properties);
-            }
+            var repository = gitClient.GetRepositoryAsync(project, repo).Result;
+            var properties = new Dictionary<string, object>();
+            properties.Add(projectKey, project);
+            properties.Add(repoKey, repository);
+
+            return new DevOpsContext(context.Connection, properties);
         }
 
         public static DevOpsContext GetLatestBuildDefinition(this DevOpsContext context)
         {
-            var buildClient = context.Connection.GetClient<BuildHttpClient>();
-            {
-                var latestDefinition = buildClient.GetFullDefinitionsAsync(project: project).Result.FirstOrDefault();
-                Dictionary<string, object> properties = context.Properties ?? new Dictionary<string, object>();
-                properties.Add("latestDefinition", latestDefinition ?? new BuildDefinition() { Name = "Adding Tags Definition" });
+            using var buildClient = context.Connection.GetClient<BuildHttpClient>();
+            var latestDefinition = buildClient.GetFullDefinitionsAsync(project: project).Result.FirstOrDefault();
+            Dictionary<string, object> properties = context.Properties ?? new Dictionary<string, object>();
+            properties.Add(buildDefinitionKey, latestDefinition ?? new BuildDefinition() { Name = "Adding Meta Tags Task" });
 
-                return new DevOpsContext(context.Connection, properties);
-            }
+            return new DevOpsContext(context.Connection, properties);
         }
 
         public static BuildDefinition UpdateLatestBuildDefinitionsWithTagTask(this DevOpsContext context)
         {
-            var buildDefinition = (BuildDefinition)context.Properties["latestDefinition"];
+            var buildDefinition = context.Properties[buildDefinitionKey] as BuildDefinition;
             var process = buildDefinition?.Process as DesignerProcess;
             if (process == null)
                 process = new DesignerProcess();
-            var connection = new VssConnection(new Uri(url), new VssBasicCredential(string.Empty, token));
 
+            using var taskClient = context.Connection.GetClient<TaskAgentHttpClient>();
+            var taskGroups = taskClient.GetTaskGroupsAsync(project).Result;
 
-            using (var taskClient = connection.GetClient<TaskAgentHttpClient>())
+            // Get tag Group
+            var taskGroup = taskGroups.First(group => group.Name == "Export-MetaTags");
+            var tagTask = taskGroup.Tasks.First();
+
+            // import to the build definition
+            var phase = process.Phases.First();
+            var buildDefinitionStep = new BuildDefinitionStep()
             {
-                var taskGroups = taskClient.GetTaskGroupsAsync(project).Result;
-
-                // Get tag Group
-                var taskGroup = taskGroups.First(group => group.Name == "Export-MetaTags");
-                var tagTask = taskGroup.Tasks.First();
-
-                // import to the build definition
-                var phase = process.Phases.First();
-                var buildDefinitionStep = new BuildDefinitionStep()
+                DisplayName = taskGroup.Name,
+                AlwaysRun = tagTask.AlwaysRun,
+                Condition = tagTask.Condition,
+                ContinueOnError = tagTask.ContinueOnError,
+                Enabled = tagTask.Enabled,
+                Environment = tagTask.Environment,
+                //RefName = taskGroup.ReferenceName,
+                TimeoutInMinutes = tagTask.TimeoutInMinutes,
+                TaskDefinition = new Microsoft.TeamFoundation.Build.WebApi.TaskDefinitionReference()
                 {
-                    DisplayName = taskGroup.Name, // tagTask.DisplayName,
-                    AlwaysRun = true, //taskGroup.// tagTask.AlwaysRun,
-                    //Condition = tagTask.Condition,
-                    //ContinueOnError = tagTask.ContinueOnError,
-                    Enabled = tagTask.Enabled,
-                    Environment = tagTask.Environment,
-                    //RefName = tagTask.ReferenceName,
-                    TimeoutInMinutes = tagTask.TimeoutInMinutes,
-                    TaskDefinition = new Microsoft.TeamFoundation.Build.WebApi.TaskDefinitionReference()
-                    {
-                        DefinitionType = "metaTask",
-                        Id = taskGroup.Id,
-                        VersionSpec = "1.*"
-                    }
-                };
-                buildDefinitionStep.Inputs = new Dictionary<string, string>();
-                taskGroup.Inputs.ToList().ForEach(input => buildDefinitionStep.Inputs.Add(input.Name, @"$(System.DefaultWorkingDirectory)\"));
-                phase.Steps.Add(buildDefinitionStep);
+                    DefinitionType = "metaTask",
+                    Id = taskGroup.Id,
+                    VersionSpec = taskGroup.Version
+                }
+            };
+
+            // set step inputs
+            buildDefinitionStep.Inputs = new Dictionary<string, string>();
+            taskGroup.Inputs.ToList().ForEach(input => buildDefinitionStep.Inputs.Add(input.Name, @"$(System.DefaultWorkingDirectory)\**\*.csproj"));
+            phase.Steps.Add(buildDefinitionStep);
+
+            // Update build definition
+            buildDefinition.Comment = "Updated with Export tag task";
+            try
+            {
+                using var buildClient = context.Connection.GetClient<BuildHttpClient>();
+
+                buildDefinition = buildClient.UpdateDefinitionAsync(buildDefinition).Result;
+                var steps = buildDefinition.GetProcess<DesignerProcess>().Phases.First().Steps.ToList();
+
+                return buildDefinition;
+
             }
-
-            buildDefinition.Comment = "Updated with tag task";
-            var buildClient = connection.GetClient<BuildHttpClient>();
-            buildDefinition = buildClient.UpdateDefinitionAsync(buildDefinition).Result;
-
-            var steps = buildDefinition.GetProcess<DesignerProcess>().Phases.First().Steps.ToList();
-
-
-
-            return buildDefinition;
+            catch (AggregateException aex)
+            {
+                throw new Exception(aex.Flatten().ToString());
+            }
         }
 
         public static DevOpsContext GetLatestReleaseDefinition(this DevOpsContext context)
         {
-            var releaseClient = context.Connection.GetClient<ReleaseHttpClient>();
-            {
-                var latestDefinition = releaseClient.GetReleaseDefinitionsAsync(project: project, "", ReleaseDefinitionExpands.Environments).Result.FirstOrDefault();
-                Dictionary<string, object> properties = context.Properties ?? new Dictionary<string, object>();
-                properties.Add("latestReleaseDefinition", latestDefinition ?? new ReleaseDefinition() { Name = "Adding Tags Definition" });
+            using var releaseClient = context.Connection.GetClient<ReleaseHttpClient>();
 
-                return new DevOpsContext(context.Connection, properties);
-            }
+            var latestDefinition = releaseClient.GetReleaseDefinitionsAsync(project: project, "", ReleaseDefinitionExpands.Environments).Result.FirstOrDefault();
+            Dictionary<string, object> properties = context.Properties ?? new Dictionary<string, object>();
+            properties.Add("latestReleaseDefinition", latestDefinition ?? new ReleaseDefinition() { Name = "Adding Meta Tags Task" });
+
+            return new DevOpsContext(context.Connection, properties);
+
         }
 
         public static ReleaseDefinition UpdateLatestReleaseDefinitionsWithTagTask(this DevOpsContext context)
         {
             var releaseDefinition = (ReleaseDefinition)context.Properties["latestReleaseDefinition"];
-            var connection = new VssConnection(new Uri(url), new VssBasicCredential(string.Empty, token));
 
-            using (var releaseClient = connection.GetClient<ReleaseHttpClient>())
-            using (var taskClient = connection.GetClient<TaskAgentHttpClient>())
+            using var releaseClient = context.Connection.GetClient<ReleaseHttpClient>();
+            using var taskClient = context.Connection.GetClient<TaskAgentHttpClient>();
+
+            var taskGroups = taskClient.GetTaskGroupsAsync(project).Result;
+            var taskGroup = taskGroups.First(group => group.Name == "Update Tags");
+            var tagTask = taskGroup.Tasks.First();
+
+            var environment = releaseDefinition.Environments.First();
+            var currentRelease = environment.CurrentReleaseReference;
+
+            var latestRelease = releaseClient.GetReleaseDefinitionAsync(project, environment.Id).Result;
+
+            var workflowTasks = latestRelease.Environments.First().DeployPhases.First().WorkflowTasks;
+
+            var worklflowTask = new WorkflowTask()
             {
-                var taskGroups = taskClient.GetTaskGroupsAsync(project).Result;
-                var taskGroup = taskGroups.First(group => group.Name == "Update Tags");
-                var tagTask = taskGroup.Tasks.First();
+                Name = taskGroup.Name,
+                Version = taskGroup.Version,
+                AlwaysRun = tagTask.AlwaysRun,
+                Condition = tagTask.Condition,
+                ContinueOnError = tagTask.ContinueOnError,
+                Enabled = tagTask.Enabled,
+                TimeoutInMinutes = tagTask.TimeoutInMinutes,
+                TaskId = taskGroup.Id,
+                DefinitionType = "metaTask",
 
-                var environment = releaseDefinition.Environments.First();
-                var currentRelease = environment.CurrentReleaseReference;
+            };
+            worklflowTask.Inputs = new Dictionary<string, string>();
+            taskGroup.Inputs.ToList().ForEach(input => worklflowTask.Inputs.Add(input.Name, ""));
+            latestRelease.Environments.First().DeployPhases.First().WorkflowTasks.Add(worklflowTask);
 
-                var latestRelease = releaseClient.GetReleaseDefinitionAsync(project, environment.Id).Result;
-                
-                var workflowTasks = latestRelease.Environments.First().DeployPhases.First().WorkflowTasks;
-
-                //var lastTask = latestRelease.Environments.First().DeployPhases.First().WorkflowTasks.Last();
-                var worklflowTask = new WorkflowTask()
-                {
-                    Name = taskGroup.Name,  
-                    Version = taskGroup.Version,
-                    AlwaysRun = tagTask.AlwaysRun,
-                    Condition = tagTask.Condition,
-                    ContinueOnError = tagTask.ContinueOnError,
-                    Enabled = tagTask.Enabled,
-                    TimeoutInMinutes = tagTask.TimeoutInMinutes,
-                    TaskId = taskGroup.Id,
-                    DefinitionType = "metaTask",
-
-                };
-                worklflowTask.Inputs = new Dictionary<string, string>();
-                taskGroup.Inputs.ToList().ForEach(input => worklflowTask.Inputs.Add(input.Name, ""));
-                latestRelease.Environments.First().DeployPhases.First().WorkflowTasks.Add(worklflowTask);
-                                
-                try
-                {
-                    latestRelease = releaseClient.UpdateReleaseDefinitionAsync(latestRelease, project).Result;
-                }
-                catch (AggregateException aex)
-                {
-                    var result = aex.Flatten();
-                    throw;
-                }
-                return latestRelease;
+            try
+            {
+                latestRelease = releaseClient.UpdateReleaseDefinitionAsync(latestRelease, project).Result;
             }
-
+            catch (AggregateException aex)
+            {
+                throw new Exception(aex.Flatten().ToString());
+            }
             
+            return latestRelease;
         }
     }
 }

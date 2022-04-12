@@ -15,22 +15,8 @@ namespace AzureDevOps.Integration.Models
 
         public DevOpsContext(VssConnection connection, Dictionary<string, object> properties) : this(connection) => Properties = properties ?? throw new ArgumentNullException(nameof(properties));
 
-        public DevOpsContext(VssConnection connection, string projectName, GitRepository repo, IEnumerable<BuildDefinition> buildDefinitions) : this(connection)
-        {
-            ProjectName = projectName;
-            Repo = repo;
-            BuildDefinitions = buildDefinitions; 
-            
-        }
-
-        public string? ProjectName { get; private set; }
-        
-        public GitRepository? Repo { get; private set; }
-        
-        public IEnumerable<BuildDefinition>? BuildDefinitions { get; private set;  }
-        
         public VssConnection Connection { get; private set; }
         
-        public Dictionary<string, object>? Properties { get; }
+        public Dictionary<string, object>? Properties { get; private set; }
     }
 }
