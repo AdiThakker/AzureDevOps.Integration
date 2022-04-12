@@ -16,7 +16,7 @@ var devOps = builder
                 .GetConfiguredRepository();
 
 // update build definition
-devOps    
+devOps
     .GetLatestBuildDefinition()
     .UpdateLatestBuildDefinitionsWithTagTask();
 
@@ -25,6 +25,7 @@ devOps
     .GetLatestReleaseDefinition()
     .UpdateLatestReleaseDefinitionsWithTagTask();
 
+Console.WriteLine("Definitions Updated!");
 Console.ReadKey();
 
 

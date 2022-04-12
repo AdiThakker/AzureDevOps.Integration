@@ -50,7 +50,7 @@ namespace AzureDevOps.Integration
 
         public static DevOpsContext GetLatestBuildDefinition(this DevOpsContext context)
         {
-            using var buildClient = context.Connection.GetClient<BuildHttpClient>();
+            var buildClient = context.Connection.GetClient<BuildHttpClient>();
             var latestDefinition = buildClient.GetFullDefinitionsAsync(project: project).Result.FirstOrDefault();
             Dictionary<string, object> properties = context.Properties ?? new Dictionary<string, object>();
             properties.Add(buildDefinitionKey, latestDefinition ?? new BuildDefinition() { Name = "Adding Meta Tags Task" });
@@ -65,7 +65,7 @@ namespace AzureDevOps.Integration
             if (process == null)
                 process = new DesignerProcess();
 
-            using var taskClient = context.Connection.GetClient<TaskAgentHttpClient>();
+            var taskClient = context.Connection.GetClient<TaskAgentHttpClient>();
             var taskGroups = taskClient.GetTaskGroupsAsync(project).Result;
 
             // Get tag Group
@@ -101,7 +101,7 @@ namespace AzureDevOps.Integration
             buildDefinition.Comment = "Updated with Export tag task";
             try
             {
-                using var buildClient = context.Connection.GetClient<BuildHttpClient>();
+                var buildClient = context.Connection.GetClient<BuildHttpClient>();
                 buildDefinition = buildClient.UpdateDefinitionAsync(buildDefinition).Result;
                 var steps = buildDefinition.GetProcess<DesignerProcess>().Phases.First().Steps.ToList();
                 return buildDefinition;
@@ -114,7 +114,7 @@ namespace AzureDevOps.Integration
 
         public static DevOpsContext GetLatestReleaseDefinition(this DevOpsContext context)
         {
-            using var releaseClient = context.Connection.GetClient<ReleaseHttpClient>();
+            var releaseClient = context.Connection.GetClient<ReleaseHttpClient>();
             var latestDefinition = releaseClient.GetReleaseDefinitionsAsync(project: project, "", ReleaseDefinitionExpands.Environments).Result.FirstOrDefault();
             Dictionary<string, object> properties = context.Properties ?? new Dictionary<string, object>();
             properties.Add(releaseDefinitionKey, latestDefinition ?? new ReleaseDefinition() { Name = "Adding Meta Tags Task" });
@@ -127,13 +127,13 @@ namespace AzureDevOps.Integration
             var releaseDefinition = context.Properties[releaseDefinitionKey] as ReleaseDefinition;
 
             // retrieve task from task group
-            using var taskClient = context.Connection.GetClient<TaskAgentHttpClient>();
+            var taskClient = context.Connection.GetClient<TaskAgentHttpClient>();
             var taskGroups = taskClient.GetTaskGroupsAsync(project).Result;
             var taskGroup = taskGroups.First(group => group.Name == "Update Tags");
             var tagTask = taskGroup.Tasks.First();
 
             // Get latest release definition by env.
-            using var releaseClient = context.Connection.GetClient<ReleaseHttpClient>();
+            var releaseClient = context.Connection.GetClient<ReleaseHttpClient>();
             var releaseDefinitionByEnv = releaseClient.GetReleaseDefinitionAsync(project, releaseDefinition.Environments.First().Id).Result;
 
             // Get definition steps
@@ -148,26 +148,27 @@ namespace AzureDevOps.Integration
                 Enabled = tagTask.Enabled,
                 TimeoutInMinutes = tagTask.TimeoutInMinutes,
                 TaskId = taskGroup.Id,
-                DefinitionType = "metaTask"
+                DefinitionType = "metaTask",
+                 
             };
             worklflowTask.Inputs = new Dictionary<string, string>();
             taskGroup.Inputs.ToList().ForEach(input =>
             {
                 var value = input.Name switch
                 {
-                    "AzureSubscription" => "<default subscription>",
-                    "resourceGroupName" => "<default resource group name>",
-                    "resourceName" => "<default resource name>",
+                    "AzureSubscription" => "",
+                    "resourceGroupName" => "resource group name param",
+                    "resourceName" => "resource name param",
                     "tagsfile" => @"$(System.DefaultWorkingDirectory)\**\Tags.txt",
                     _ => ""
                 };
                 worklflowTask.Inputs.Add(input.Name, value);
             });
-            
+
             // Update definition
             releaseDefinitionByEnv.Environments.First().DeployPhases.First().WorkflowTasks.Add(worklflowTask);
             releaseDefinitionByEnv.Comment = "Updated with Update tag task";
-                
+
             try
             {
                 releaseDefinitionByEnv = releaseClient.UpdateReleaseDefinitionAsync(releaseDefinitionByEnv, project).Result;
