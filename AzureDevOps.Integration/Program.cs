@@ -9,7 +9,7 @@ var builder  = new ConfigurationBuilder()
                     .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
                     .AddUserSecrets<Program>();
 
-
+// Connect to Azure DevOps
 var devOps = builder
                 .Build()
                 .ConnectToAzureDevOps()
