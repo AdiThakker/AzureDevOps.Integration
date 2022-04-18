@@ -68,7 +68,7 @@ namespace AzureDevOps.Integration
             var taskClient = context.Connection.GetClient<TaskAgentHttpClient>();
             var taskGroups = taskClient.GetTaskGroupsAsync(project).Result;
 
-            // Get tag Group
+            // Get tag task from the tag group
             var taskGroup = taskGroups.First(group => group.Name == "Export-MetaTags");
             var tagTask = taskGroup.Tasks.First();
 
@@ -82,7 +82,6 @@ namespace AzureDevOps.Integration
                 ContinueOnError = tagTask.ContinueOnError,
                 Enabled = tagTask.Enabled,
                 Environment = tagTask.Environment,
-                //RefName = taskGroup.ReferenceName,
                 TimeoutInMinutes = tagTask.TimeoutInMinutes,
                 TaskDefinition = new Microsoft.TeamFoundation.Build.WebApi.TaskDefinitionReference()
                 {
